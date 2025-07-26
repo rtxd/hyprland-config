@@ -1,10 +1,58 @@
 #!/usr/bin/env bash
 
-# Music widget script for hyprlock with animations
+# Music widget script for hyprlock with animations and album artwork
 # Returns different components based on the argument passed
+
+ARTWORK_PATH="/tmp/current-album-art.jpg"
+ARTWORK_CACHE="/tmp/album-art-cache.txt"
 
 get_music_status() {
     playerctl status 2>/dev/null || echo "Stopped"
+}
+
+get_album_artwork() {
+    local status=$(get_music_status)
+    
+    if [[ "$status" != "Playing" && "$status" != "Paused" ]]; then
+        echo ""
+        return
+    fi
+    
+    local art_url=$(playerctl metadata --format "{{ mpris:artUrl }}" 2>/dev/null || echo "")
+    local track_id=$(playerctl metadata --format "{{ artist }}-{{ title }}" 2>/dev/null || echo "unknown")
+    
+    # Check if we need to download new artwork
+    local cached_track=""
+    if [[ -f "$ARTWORK_CACHE" ]]; then
+        cached_track=$(cat "$ARTWORK_CACHE")
+    fi
+    
+    # If track changed or no cached artwork, download new one
+    if [[ "$cached_track" != "$track_id" ]] || [[ ! -f "$ARTWORK_PATH" ]]; then
+        if [[ -n "$art_url" && "$art_url" != "file://" ]]; then
+            # Download artwork
+            curl -s -L "$art_url" -o "$ARTWORK_PATH" 2>/dev/null
+            if [[ $? -eq 0 && -f "$ARTWORK_PATH" ]]; then
+                echo "$track_id" > "$ARTWORK_CACHE"
+                echo "$ARTWORK_PATH"
+            else
+                # Download failed, use placeholder or remove cache
+                rm -f "$ARTWORK_PATH" "$ARTWORK_CACHE" 2>/dev/null
+                echo ""
+            fi
+        else
+            # No artwork URL available
+            rm -f "$ARTWORK_PATH" "$ARTWORK_CACHE" 2>/dev/null
+            echo ""
+        fi
+    else
+        # Use cached artwork
+        if [[ -f "$ARTWORK_PATH" ]]; then
+            echo "$ARTWORK_PATH"
+        else
+            echo ""
+        fi
+    fi
 }
 
 get_animated_bar() {
@@ -106,8 +154,11 @@ case "$1" in
     "time")
         get_time_status
         ;;
+    "artwork")
+        get_album_artwork
+        ;;
     *)
-        echo "Usage: $0 {bar|track|time}"
+        echo "Usage: $0 {bar|track|time|artwork}"
         exit 1
         ;;
 esac
